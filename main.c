@@ -1,112 +1,224 @@
 #include "main.h"
-#include "spi.h"
-#include "data.h"
-#include "main.h"
+#include "stm32f1xx_hal.h"
+#include "fatfs.h"
 #include <string.h>
 #include "ssd1306.h"
 #include "fonts.h"
-
+#include "spi.h"
+#include "data.h"
 
 I2C_HandleTypeDef hi2c1;
-const uint8_t APBPrescTable[8]  = {0, 0, 0, 0, 1, 2, 3, 4};
+SPI_HandleTypeDef hspi1;
+////////////////////////////////////////////////////
+// FATFS реализован на базе стандартной библиотеки от СТМ.
+FATFS fs;
+FATFS *pfs;
+FIL fil;
+FRESULT fres;
+DWORD fre_clust;
+uint32_t total, free;
+/////////////////////////////////////////////////////
+// Блок переменных
+void delay_us(uint32_t us);
 uint8_t program_enable_byte;
 unsigned int i;
 uint8_t reload_counter;
 uint8_t signature[3];	
-unsigned int string_structure[];
+unsigned int string_structure[100];
+void write_string (char* string);
 int convert (char x, char y);
 int o;
 
-
-
+		int x, y;
+		int i2, res = -1;
+char buffer[1000];
+int addr = 0;	
+////////////////////////////////////////////////
 int main(void)
 {
-
   HAL_Init();
   SystemClock_Config();
   MX_GPIO_Init();
-	MX_I2C1_Init();
-  ssd1306_Init (&hi2c1); // Инициализация дисплея, на котором выводятся принимаемые данные. Используется для отладки
-
+  MX_SPI1_Init();
+  MX_I2C1_Init();
+  MX_FATFS_Init(); 
+  ssd1306_Init (&hi2c1);	
 	
-power_and_reset_sequence (); //Функция перезагрузки AVR
-program_enable_byte = SPI_Read_Write (program_enable, 4, 3); // пересылаемый от AVR байт при отправки команды (program enable);
-
-signature[0] = SPI_Read_Write (read_signature1, 4, 4);
-signature[1] = SPI_Read_Write (read_signature2, 4, 4);	
-signature[2] = SPI_Read_Write (read_signature3, 4, 4); //Чтение внутреннего идентификатора
-
+if (f_mount(&fs, "", 0) == FR_OK) {                     // Монтируем карту
+ ssd1306_Fill (0);		
+ ssd1306_SetCursor (0,0);		
+ ssd1306_WriteString ("SD MOUNT OK", Font_7x10, 1);	//Вывод информации об успешном монтировании на дисплей
+ ssd1306_UpdateScreen (&hi2c1);
+ HAL_Delay (1000);
+}
+else {
+ ssd1306_Fill (0);		
+ ssd1306_SetCursor (0,0);		
+ ssd1306_WriteString ("SD MOUNT NE OK", Font_7x10, 1);	//Вывод информации о неудаче на дисплей
+ ssd1306_UpdateScreen (&hi2c1);	
+ HAL_Delay (1000);
+}
 	
-	SPI_Write (chip_erase,4); // Очистка памяти МК
+if (f_open(&fil, "firmware.hex", FA_READ) == FR_OK) { //Открываем файл, содержащий прошивку. Для удобства в дальнейшем можно сделать возможность выбора файла, из которого в дальнейшембудут считываться данные
+ ssd1306_Fill (0);		
+ ssd1306_SetCursor (0,0);	
+ ssd1306_WriteString ("SD OPEN OK", Font_7x10, 1); //Вывод информации на дисплей об успешном открытии файла
+ ssd1306_UpdateScreen (&hi2c1);
+ HAL_Delay (1000);
+}
+else {
+ ssd1306_Fill (0);		
+ ssd1306_SetCursor (0,0);		
+ ssd1306_WriteString ("SD OPEN NE OK", Font_7x10, 1);//Вывод информации о неудаче на дисплей		
+ ssd1306_UpdateScreen (&hi2c1);	
+ HAL_Delay (1000);	
+}
+///////////////////////////////////////////////////////////////////  
+
+power_and_reset_sequence (); //Выполняем перезагрузку и подготовку камня к прошивке
+program_enable_byte = SPI_Read_Write (program_enable, 4, 3); // Вводим АВРку в режим программирования, попутно считывая байт
 	
-if (program_enable_byte == 0x53) {
-//Stage1_OK (); //Условная функция проверки. (К примеру, загорается светодиод).
+	if (program_enable_byte == 0x53) {
+	ssd1306_Fill (0);
+	ssd1306_SetCursor (0,0);
+	ssd1306_WriteString ("Progr. mode enabled", Font_7x10, 1); // Режим программирования успешно включен
+	ssd1306_UpdateScreen (&hi2c1);
+	HAL_Delay (1000);
 }
 else 
 {
-	power_and_reset_sequence (); //Если проверка не пройдена, снова перезагружаем AVR
-//	Stage1_NOK (); // Условная функция ошибки при проверке. ((К примеру, загорается светодиод)
-	reload_counter = reload_counter +1; //Счетчик количества перезагрузок AVR
-}
-if (reload_counter >= 3) NVIC_SystemReset(); //Если сделали больше 3-х перезагрузок, то перезагружаем сам программатор
 
-if ((signature[0] == 0x1E) && (signature[1] == 0x93) && (signature[1] == 0x1E))
+	ssd1306_Fill (0);
+	ssd1306_SetCursor (0,0);
+	ssd1306_WriteString ("Progr. mode failed", Font_7x10, 1); //Режим программирования успешно не включился.
+	ssd1306_UpdateScreen (&hi2c1);
+	HAL_Delay (1000);
+	reload_counter = reload_counter +1;
+}
+if (reload_counter >= 3) NVIC_SystemReset(); // в случае 3-х промахов перезагружаем управляющий контроллер.
+
+
+signature[0] = SPI_Read_Write (read_signature1, 4, 4);
+signature[1] = SPI_Read_Write (read_signature2, 4, 4);	
+signature[2] = SPI_Read_Write (read_signature3, 4, 4);//Считываем идентификатор модели АВРки
+
+
+if ((signature[0] == 0x1E) && (signature[1] == 0x93) && (signature[2] == 0x0F))
 {
-	// LCD_Print ("Atmega 88PA"); //Условная функция отображения названия микросхемы.
-}
-//else if //В дальнейшем можно добавить друге контроллеры и на экране будет выводиться их название.
-
-for (int u = 0; u <= sizeof (main_program); u++) { //Начинаем читать строку u-ю HEX-файла
-	//предполагаю, что с СД-карты данные будут идти в виде строк, поэтому сделал функцию для конвертации данных из char[2] в uint8_t
-string_structure[0] = convert (main_program[u][0], main_program[u][1]); // Считываем количество байт данных в строке (стандарт Intel hex);
-string_structure[1] = convert (main_program[u][2], main_program[u][3]); 
-string_structure[2] = convert (main_program[u][4], main_program[u][5]); // считываем 2 байта начального адреса страницы в памяти МК, куда будет все записываться.
-string_structure[3] = convert (main_program[u][6], main_program[u][7]); // Считываем информацию о строке
+ ssd1306_Fill (0);
+ ssd1306_SetCursor (0,0);
+ ssd1306_WriteString ("Atmega88-PA", Font_7x10, 1); //Потом можно будет добавить и другие АВРки
+ ssd1306_UpdateScreen (&hi2c1);
+ HAL_Delay (1000);
+}	
+else
+{
+	ssd1306_Fill (0);
+	ssd1306_SetCursor (0,0);
+	ssd1306_WriteString ("Signature Failed", Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);
+	HAL_Delay (1000);	
+}	
 	
-SPI_Write ((uint8_t*) 0x4D, 1);  //Пишем команду для записи адреса страницы
-SPI_Write ((uint8_t*) 0x00, 1); 
-SPI_Write ((uint8_t*)string_structure[2], 1); //Шлем AVR адрес страницы, на которую будем записывать код
-SPI_Write ((uint8_t*) 0x00, 1); 
-int addr = 0;	//Начальный адрес слова для страницы
 	
-for (o = 4; o <= (string_structure[0] + 4); o++) {
-string_structure[o] = convert (main_program[u][o+3], main_program[u][o+4]); // В этом цикле мы загоняем все байты данных в массив, из которого потом будем перегонять их в AVR
-SPI_Write ((uint8_t*) 0x40, 1); // команда записи младшего байта 
-SPI_Write ((uint8_t*) 0x00, 1);
-SPI_Write ((uint8_t*) addr , 1);//адрес слова
-SPI_Write ((uint8_t*) string_structure[o] , 1);	 //передача младшего байта
+	
+SPI_Write (chip_erase,4); //Очищаем АВРку
+ssd1306_Fill (0);
+ssd1306_SetCursor (0,0);
+ssd1306_WriteString ("Chip is clear", Font_7x10, 1);
+ssd1306_UpdateScreen (&hi2c1);
+HAL_Delay (1000);
 
-SPI_Write ((uint8_t*) 0x48, 1); //команда записи старшего байта
-SPI_Write ((uint8_t*) 0x00, 1);
-SPI_Write ((uint8_t*) addr , 1); //адрес слова
-SPI_Write ((uint8_t*) string_structure[o+1] , 1); //передача старшего байта
-	addr = addr +1; //инкременируем адрес слова
+	
+/*
+Чтение данных с карты можно реализовать различными способами. 
+Изначально я хотел считать весь файл в какую-нибудь переменную. Учитывая, что у 88-й объем флеш-памяти равен 2байта*32слова*64Стр = 4кб.,
+то внутренней памяти СТМки хватило бы с запасом. Если бы я пошел этим путем, то я бы прогнал весь массив данных, парсируя из него символы начала строки и символы сдвига каретки \r\n.
+Так можно было бы узнать количество строк в файле, а также длинну этих строк, а затем просто впихнуть их в алгоритм прораммирования.
+Но этот способ не очень практичный, учитывая, что атмеги бывают разные, а память у них отличается.
+
+Поэтому был выбран другой способ: Данные достаются построчно в один и тот же буффер, который сразу же прогоняется по алгоритму программирования и записывает данные в память АВРки.
+После того, как данные отправлены, буфер заполняется заново.
+
+*/
+while(f_gets((TCHAR*)buffer, 10000, &fil))
+  {
+for (i2 = 0; i2 <=100; i2++) {
+	   if ((buffer[i2] != 10) && (buffer[i2] != 13)) { //убираем символы сдвига каретки из массива.		 		 
+	      ssd1306_Fill (0);
+	      ssd1306_SetCursor (0,0);
+	      ssd1306_printInt (0, 20, i2, Font_7x10, 1);
+	      ssd1306_UpdateScreen (&hi2c1);
+	}
+else {
+                i2 = 100; //как только мы натыкаемся на символы сдвига каретки, мы выходим из цикла считывания строки.
+		res = res +1;
+     }
 }
-//На этом я пока и закончил.
+
+string_structure[0] = convert (buffer[1], buffer[2]); //Узнаем количество байт в строке.
+string_structure[1] = convert (buffer[3], buffer[4]);
+string_structure[2] = convert (buffer[5], buffer[6]); // Начальный адрес записи.
+string_structure[3] = convert (buffer[7], buffer[8]); //Тип строки (запись, чтение, последняя строка и пр.)
+
+if (string_structure[3] == 00) { //Учитывая, что мы только прошиваем камень и строки чтения нас не интересуют, мы отбрасываем другие строки. (К примеру, последнюю, которая не несет в себе ничего кроме данных о том, что она последняя).
+int p = -2;//
+
+for (o = 4; o <= (string_structure[0] + 3); o = o+2) {
+ if (o == 4) {
+	string_structure[4] = convert (buffer[9], buffer[10]); //Если у нас первый байт данных строки, то преобразуем его следующим образом:
+	string_structure[5] = convert (buffer[11], buffer[12]); 	
 }
-power_and_reset_sequence ();
+else {
+p = p+2;
+string_structure[o] = convert (buffer[o+7+p], buffer[o+8+p]); // Если у нас последующие байты строки, то преобразуем их по формуле:
+string_structure[o+1] = convert (buffer[o+9+p], buffer[o+10+p]);
+}
+}
+/*
+После того, как строка преобразована из текстового вида в вещественную переменную, мы можем начать ее записывать в память контроллера.
+*/
+	
+for (int k = 4; k <= (string_structure[0] + 3); k=k+2) { //Ориентируемся на 1-й байт парсированной строки, в котором указано количество символов.
+unsigned char str2[4] = 	{0x40, 0x00, addr, string_structure[k]}; //Запись младшего байта по адресу addr. Адрес должен инкеменироваться каждую новую итерацию, чтобы не записывать все в одну ячейк.
+SPI_Write (str2, 4);
+unsigned char str3[4] = 	{0x48, 0x00, addr, string_structure[k+1]}; //Старший байт слова
+SPI_Write (str3, 4); 
+addr = addr +1; // Адрес слова.
+}
+}
+page (res); // Данная функция реализует запись загруженных данных на одну страницу. Переменная res содержит в себе данные о номере текущей страницы, на которую ведётся запись данных. 
+//С адресацией слов и байт данных у АВР все очень непросто и я потратил несколько часов, чтобы нормально доработать эту функцию
+}
+/*
+После того, как страница записана, цикл возвращается к работе с новой строкой hex-файла. И так до тех пор, пока не будут записаны все строки.
+*/
+	
+reset_sequence;//Перезагрузка АВРки
+ssd1306_Fill (0);
+ssd1306_SetCursor (0,0);
+ssd1306_WriteString ("Done", Font_7x10, 1);//Прошивка закончена.
+ssd1306_UpdateScreen (&hi2c1);
+
+//////////////////////////////////////////////////////////////////////
+
+f_close(&fil); //Закрываем хекс
+f_mount(NULL, "", 1);
+	
   while (1)
-{
-
-
+  {
+		
+  }
 }
-}
+	
 
-void delay_us(uint32_t us) //функция задержки для SPI
-{
-	uint32_t us_count_tick =  us * (SystemCoreClock/1000000);
-	SCB_DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-	DWT_CYCCNT  = 0;
-	DWT_CONTROL |= DWT_CTRL_CYCCNTENA_Msk; 
-	while(DWT_CYCCNT < us_count_tick);
-	DWT_CONTROL &= ~DWT_CTRL_CYCCNTENA_Msk;
-}
 
 
 void SystemClock_Config(void)
 {
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  RCC_OscInitTypeDef RCC_OscInitStruct;
+  RCC_ClkInitTypeDef RCC_ClkInitStruct;
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
@@ -116,7 +228,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
@@ -124,37 +236,38 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-	
+
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
+  HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq()/1000);
+  HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+  HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
 }
 
 
-
-
-static void MX_GPIO_Init(void)
+static void MX_SPI1_Init(void)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE(); 
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
 
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4|GPIO_PIN_3|GPIO_PIN_5|GPIO_PIN_7, GPIO_PIN_RESET);
-
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_3|GPIO_PIN_5|GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-	
-	  GPIO_InitStruct.Pin = GPIO_PIN_6;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 }
+
 
 static void MX_I2C1_Init(void)
 {
@@ -169,17 +282,62 @@ static void MX_I2C1_Init(void)
   hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
   if (HAL_I2C_Init(&hi2c1) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 }
 
 
+static void MX_GPIO_Init(void)
+{
 
-int convert (char x, char y) { //функция для перевода  данных из str в int (да, немного на костылях из-за особенностей кодировки ASCII).
+  GPIO_InitTypeDef GPIO_InitStruct;
+
+  __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+	
+	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_3|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_4, GPIO_PIN_RESET);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4;// SCK1, MOSI1, POWER, RST1, CS2
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	
+	  GPIO_InitStruct.Pin = GPIO_PIN_11; // MISO1
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+}
+
+
+
+
+void _Error_Handler(char * file, int line)
+{
+  while(1) 
+  {
+  }
+}
+
+
+void delay_us(uint32_t us) //Задержка для SPI
+{
+	uint32_t us_count_tick =  us * (SystemCoreClock/1000000);
+	SCB_DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+	DWT_CYCCNT  = 0;
+	DWT_CONTROL |= DWT_CTRL_CYCCNTENA_Msk; 
+	while(DWT_CYCCNT < us_count_tick);
+	DWT_CONTROL &= ~DWT_CTRL_CYCCNTENA_Msk;
+}
+
+
+
+int convert (char x, char y) { //Функция перевода данных строки в вещественные переменные.
 int out1, out2, out, v,v1;
 	
 out1 = (x - '0');
-
 if (out1 == 22) out1 = 15;	
 if (out1 == 21) out1 = 14;
 if (out1 == 20) out1 = 13;
@@ -195,16 +353,8 @@ if (out2 == 19) out2 = 12;
 if (out2 == 18) out2 = 11;
 if (out2 == 17) out2 = 10;
 
-out = out1 << 4  | out2;
+out = out1 << 4 | out2;
 return out;
 }
 
-void Error_Handler(void)
-{
-  __disable_irq();
-  while (1)
-  {
-		
-  }
 
-}
