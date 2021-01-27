@@ -2,23 +2,26 @@
 #include "stm32f1xx_hal.h"
 #include "fatfs.h"
 #include <string.h>
+#include <stdio.h>
 #include "ssd1306.h"
 #include "fonts.h"
 #include "spi.h"
 #include "data.h"
+#include "ff.h"
+
 
 I2C_HandleTypeDef hi2c1;
 SPI_HandleTypeDef hspi1;
-////////////////////////////////////////////////////
-// FATFS реализован на базе стандартной библиотеки от СТМ.
+
 FATFS fs;
 FATFS *pfs;
 FIL fil;
 FRESULT fres;
 DWORD fre_clust;
+FILINFO fsize, fname;
+DIR dir;
 uint32_t total, free;
-/////////////////////////////////////////////////////
-// Блок переменных
+
 void delay_us(uint32_t us);
 uint8_t program_enable_byte;
 unsigned int i;
@@ -27,90 +30,124 @@ uint8_t signature[3];
 unsigned int string_structure[100];
 void write_string (char* string);
 int convert (char x, char y);
+void delay_us(uint32_t us);
+uint8_t find_key (char key[], char array[]);
+uint8_t read_fuses (char array[100]);
 int o;
-
-		int x, y;
+		int x, y, m;
 		int i2, res = -1;
+
+
 char buffer[1000];
+char batbuffer[100];
+
+
 int addr = 0;	
-////////////////////////////////////////////////
+char model [15];
 int main(void)
 {
   HAL_Init();
   SystemClock_Config();
   MX_GPIO_Init();
   MX_SPI1_Init();
-  MX_I2C1_Init();
-  MX_FATFS_Init(); 
-  ssd1306_Init (&hi2c1);	
+	MX_I2C1_Init();
+  MX_FATFS_Init();
+	ssd1306_Init (&hi2c1);	
 	
-if (f_mount(&fs, "", 0) == FR_OK) {                     // Монтируем карту
- ssd1306_Fill (0);		
- ssd1306_SetCursor (0,0);		
- ssd1306_WriteString ("SD MOUNT OK", Font_7x10, 1);	//Вывод информации об успешном монтировании на дисплей
- ssd1306_UpdateScreen (&hi2c1);
- HAL_Delay (1000);
-}
-else {
- ssd1306_Fill (0);		
- ssd1306_SetCursor (0,0);		
- ssd1306_WriteString ("SD MOUNT NE OK", Font_7x10, 1);	//Вывод информации о неудаче на дисплей
- ssd1306_UpdateScreen (&hi2c1);	
- HAL_Delay (1000);
-}
-	
-if (f_open(&fil, "firmware.hex", FA_READ) == FR_OK) { //Открываем файл, содержащий прошивку. Для удобства в дальнейшем можно сделать возможность выбора файла, из которого в дальнейшембудут считываться данные
- ssd1306_Fill (0);		
- ssd1306_SetCursor (0,0);	
- ssd1306_WriteString ("SD OPEN OK", Font_7x10, 1); //Вывод информации на дисплей об успешном открытии файла
- ssd1306_UpdateScreen (&hi2c1);
- HAL_Delay (1000);
-}
-else {
- ssd1306_Fill (0);		
- ssd1306_SetCursor (0,0);		
- ssd1306_WriteString ("SD OPEN NE OK", Font_7x10, 1);//Вывод информации о неудаче на дисплей		
- ssd1306_UpdateScreen (&hi2c1);	
- HAL_Delay (1000);	
-}
-///////////////////////////////////////////////////////////////////  
 
-power_and_reset_sequence (); //Выполняем перезагрузку и подготовку камня к прошивке
-program_enable_byte = SPI_Read_Write (program_enable, 4, 3); // Вводим АВРку в режим программирования, попутно считывая байт
+	if (f_mount(&fs, "", 0) == FR_OK) {
+ssd1306_Fill (0);		
+ssd1306_SetCursor (0,0);		
+ssd1306_WriteString ("SD MOUNT OK", Font_7x10, 1);		
+ssd1306_UpdateScreen (&hi2c1);
+HAL_Delay (1000);
+	}
+	else {
+ssd1306_Fill (0);		
+ssd1306_SetCursor (0,0);		
+ssd1306_WriteString ("SD MOUNT NE OK", Font_7x10, 1);		
+ssd1306_UpdateScreen (&hi2c1);	
+HAL_Delay (1000);
+	}
+	
+	
+if (f_open(&fil, "prog4.bat", FA_READ) == FR_OK) {
+ssd1306_Fill (0);		
+ssd1306_SetCursor (0,0);	
+ssd1306_WriteString ("SD OPEN OK", Font_7x10, 1);		
+ssd1306_UpdateScreen (&hi2c1);
+HAL_Delay (1000);
+}
+	else {
+ssd1306_Fill (0);		
+ssd1306_SetCursor (0,0);		
+ssd1306_WriteString ("SD OPEN NE OK", Font_7x10, 1);		
+ssd1306_UpdateScreen (&hi2c1);	
+HAL_Delay (1000);	
+	}
+
+
+while(f_gets((TCHAR*)buffer, 10000, &fil))
+  {
+for (i2 = 0; i2 <= 100; i2++) {
+if ((buffer[i2] != 13) && (buffer [i2] != 10))	 {
+	batbuffer[m++] = buffer[i2];
+}
+else {
+	i2 = 100;
+	m = 0;
+}
+}
+read_fuses(batbuffer);
+	ssd1306_Fill (0);
+  ssd1306_printInt (0,0,cksel, Font_7x10, 1);
+ssd1306_SetCursor (0,20);
+ssd1306_WriteString (batbuffer, Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);
+
+}
+
+	/*
+///////////////////////////////////////////////////////////////////  
+	
+	power_and_reset_sequence ();
+  program_enable_byte = SPI_Read_Write (program_enable, 4, 3);
 	
 	if (program_enable_byte == 0x53) {
 	ssd1306_Fill (0);
 	ssd1306_SetCursor (0,0);
-	ssd1306_WriteString ("Progr. mode enabled", Font_7x10, 1); // Режим программирования успешно включен
+	ssd1306_WriteString ("Progr. mode enabled", Font_7x10, 1);
 	ssd1306_UpdateScreen (&hi2c1);
-	HAL_Delay (1000);
+		HAL_Delay (1000);
 }
 else 
 {
-
-	ssd1306_Fill (0);
+	power_and_reset_sequence ();
+  ssd1306_Fill (0);
 	ssd1306_SetCursor (0,0);
-	ssd1306_WriteString ("Progr. mode failed", Font_7x10, 1); //Режим программирования успешно не включился.
+	ssd1306_WriteString ("Progr. mode failed", Font_7x10, 1);
 	ssd1306_UpdateScreen (&hi2c1);
 	HAL_Delay (1000);
 	reload_counter = reload_counter +1;
 }
-if (reload_counter >= 3) NVIC_SystemReset(); // в случае 3-х промахов перезагружаем управляющий контроллер.
+if (reload_counter >= 3) NVIC_SystemReset();
 
 
 signature[0] = SPI_Read_Write (read_signature1, 4, 4);
 signature[1] = SPI_Read_Write (read_signature2, 4, 4);	
-signature[2] = SPI_Read_Write (read_signature3, 4, 4);//Считываем идентификатор модели АВРки
+signature[2] = SPI_Read_Write (read_signature3, 4, 4);
 
 
 if ((signature[0] == 0x1E) && (signature[1] == 0x93) && (signature[2] == 0x0F))
 {
- ssd1306_Fill (0);
- ssd1306_SetCursor (0,0);
- ssd1306_WriteString ("Atmega88-PA", Font_7x10, 1); //Потом можно будет добавить и другие АВРки
- ssd1306_UpdateScreen (&hi2c1);
- HAL_Delay (1000);
+  ssd1306_Fill (0);
+	ssd1306_SetCursor (0,0);
+	ssd1306_WriteString ("Atmega88-PA", Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);
+	HAL_Delay (1000);
 }	
+
+
 else
 {
 	ssd1306_Fill (0);
@@ -120,98 +157,163 @@ else
 	HAL_Delay (1000);	
 }	
 	
-	
-	
-SPI_Write (chip_erase,4); //Очищаем АВРку
+SPI_Write (chip_erase,4);	 
 ssd1306_Fill (0);
 ssd1306_SetCursor (0,0);
 ssd1306_WriteString ("Chip is clear", Font_7x10, 1);
 ssd1306_UpdateScreen (&hi2c1);
 HAL_Delay (1000);
 
-	
-/*
-Чтение данных с карты можно реализовать различными способами. 
-Изначально я хотел считать весь файл в какую-нибудь переменную. Учитывая, что у 88-й объем флеш-памяти равен 2байта*32слова*64Стр = 4кб.,
-то внутренней памяти СТМки хватило бы с запасом. Если бы я пошел этим путем, то я бы прогнал весь массив данных, парсируя из него символы начала строки и символы сдвига каретки \r\n.
-Так можно было бы узнать количество строк в файле, а также длинну этих строк, а затем просто впихнуть их в алгоритм прораммирования.
-Но этот способ не очень практичный, учитывая, что атмеги бывают разные, а память у них отличается.
 
-Поэтому был выбран другой способ: Данные достаются построчно в один и тот же буффер, который сразу же прогоняется по алгоритму программирования и записывает данные в память АВРки.
-После того, как данные отправлены, буфер заполняется заново.
-
-*/
 while(f_gets((TCHAR*)buffer, 10000, &fil))
   {
-for (i2 = 0; i2 <=100; i2++) {
-	   if ((buffer[i2] != 10) && (buffer[i2] != 13)) { //убираем символы сдвига каретки из массива.		 		 
-	      ssd1306_Fill (0);
-	      ssd1306_SetCursor (0,0);
-	      ssd1306_printInt (0, 20, i2, Font_7x10, 1);
-	      ssd1306_UpdateScreen (&hi2c1);
-	}
-else {
-                i2 = 100; //как только мы натыкаемся на символы сдвига каретки, мы выходим из цикла считывания строки.
-		res = res +1;
-     }
+for (i2 = 0; i2 <=1000; i2++) {
+	   if ((buffer[i2] != 10) && (buffer[i2] != 13)) {
+	ssd1306_Fill (0);
+	ssd1306_SetCursor (0,0);
+	ssd1306_printInt (0, 20, i2, Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);
+		 }
+		 else {
+			 if (i2 >= 16) res = res +1;
+			 i2 = 1000;
+		 }
 }
 
-string_structure[0] = convert (buffer[1], buffer[2]); //Узнаем количество байт в строке.
+string_structure[0] = convert (buffer[1], buffer[2]);
 string_structure[1] = convert (buffer[3], buffer[4]);
-string_structure[2] = convert (buffer[5], buffer[6]); // Начальный адрес записи.
-string_structure[3] = convert (buffer[7], buffer[8]); //Тип строки (запись, чтение, последняя строка и пр.)
-
-if (string_structure[3] == 00) { //Учитывая, что мы только прошиваем камень и строки чтения нас не интересуют, мы отбрасываем другие строки. (К примеру, последнюю, которая не несет в себе ничего кроме данных о том, что она последняя).
-int p = -2;//
+string_structure[2] = convert (buffer[5], buffer[6]);
+string_structure[3] = convert (buffer[7], buffer[8]);
+if (string_structure[3] == 00) {
+int p = -2;
 
 for (o = 4; o <= (string_structure[0] + 3); o = o+2) {
- if (o == 4) {
-	string_structure[4] = convert (buffer[9], buffer[10]); //Если у нас первый байт данных строки, то преобразуем его следующим образом:
+if (o == 4) {
+	string_structure[4] = convert (buffer[9], buffer[10]); // ??????? ?? ????????? ????? ??????, ??????? ?????????? ?????????
 	string_structure[5] = convert (buffer[11], buffer[12]); 	
 }
 else {
-p = p+2;
-string_structure[o] = convert (buffer[o+7+p], buffer[o+8+p]); // Если у нас последующие байты строки, то преобразуем их по формуле:
-string_structure[o+1] = convert (buffer[o+9+p], buffer[o+10+p]);
+	p = p+2;
+	string_structure[o] = convert (buffer[o+7+p], buffer[o+8+p]); // ??????? ?? ????????? ????? ??????, ??????? ?????????? ?????????
+	string_structure[o+1] = convert (buffer[o+9+p], buffer[o+10+p]);
 }
 }
-/*
-После того, как строка преобразована из текстового вида в вещественную переменную, мы можем начать ее записывать в память контроллера.
-*/
-	
-for (int k = 4; k <= (string_structure[0] + 3); k=k+2) { //Ориентируемся на 1-й байт парсированной строки, в котором указано количество символов.
-unsigned char str2[4] = 	{0x40, 0x00, addr, string_structure[k]}; //Запись младшего байта по адресу addr. Адрес должен инкеменироваться каждую новую итерацию, чтобы не записывать все в одну ячейк.
+
+for (int k = 4; k <= (string_structure[0] + 3); k=k+2) {
+unsigned char str2[4] = 	{0x40, 0x00, addr, string_structure[k]}; //low byte
 SPI_Write (str2, 4);
-unsigned char str3[4] = 	{0x48, 0x00, addr, string_structure[k+1]}; //Старший байт слова
+unsigned char str3[4] = 	{0x48, 0x00, addr, string_structure[k+1]}; //high byte
 SPI_Write (str3, 4); 
-addr = addr +1; // Адрес слова.
+addr = addr +1; // word addr
 }
 }
-page (res); // Данная функция реализует запись загруженных данных на одну страницу. Переменная res - номер текущей страницы, на которую ведётся запись данных. 
-//С адресацией у АВР все очень непросто, пришлось поломать голову
-}
-/*
-После того, как страница записана, цикл возвращается к работе с новой строкой hex-файла. И так до тех пор, пока не будут записаны все строки.
-*/
+page (res);
+	}
 	
-reset_sequence;//Перезагрузка АВРки
-ssd1306_Fill (0);
-ssd1306_SetCursor (0,0);
-ssd1306_WriteString ("Done", Font_7x10, 1);//Прошивка закончена.
-ssd1306_UpdateScreen (&hi2c1);
+
+	void reset_sequence (void);
+  ssd1306_Fill (0);
+	ssd1306_SetCursor (0,0);
+	ssd1306_WriteString ("Done", Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);
 
 //////////////////////////////////////////////////////////////////////
-//В дальнейшем будут добавлены функции верификации и сравнения контрольной суммы.
-//Важный момент: Стабильный обмен данными возможен только при задержки SPI до 800мкс между тактами.
-f_close(&fil); //Закрываем хекс
+
+
+*/
+
+f_close(&fil);
 f_mount(NULL, "", 1);
-	
+
   while (1)
   {
 		
   }
 }
+
+uint8_t find_key (char key[10], char array[100]) {
+char *istr = strstr (array,key);
 	
+   if ( istr == NULL) {
+return 0;
+	 }
+   else {
+		 uint8_t pos = istr-batbuffer+1;
+return pos;
+}
+}
+
+uint8_t read_fuses (char array[100]) {
+
+uint8_t pos = find_key ("bodlevel=", array);
+	if (pos!=0) {
+bodlevel = (array[pos+8] - '0');
+pos = 0;
+	}
+	
+pos = find_key ("rstdisbl=", array);
+	if (pos!=0) {	
+rstdisbl = array[pos+8] - '0';
+pos = 0;	
+	}		
+	
+pos = find_key ("dwen=", array);
+	if (pos!=0) {
+dwen = array[pos+4] - '0';
+pos = 0;
+	}
+	
+pos = find_key ("wdton=", array);
+		if (pos!=0) {
+wdton = array[pos+5]- '0';
+pos = 0;
+		}
+				
+pos = find_key ("eesave=", array);
+			if (pos!=0) {
+eesave = (array[pos+6]) - '0';
+pos = 0;
+			}
+				
+pos = find_key ("ckdiv8=", array);
+			if (pos!=0) {
+ckdiv8 = (array[pos+6]) - '0';
+pos = 0;
+			}
+				
+pos = find_key ("ckout=", array);
+			if (pos!=0) {
+ckout = (array[pos+5]) - '0';
+pos = 0;
+			}			
+				
+pos = find_key ("sut=", array);
+			if (pos!=0) {
+sut = (array[pos+3]) - '0';
+pos = 0;
+			}			
+							
+pos = find_key ("cksel=", array);
+			if (pos!=0) {
+cksel = (array[pos+5]) - '0';
+pos = 0;
+			}
+			
+pos = find_key ("bootsz=", array);
+			if (pos!=0) {
+bootsz = (array[pos+6]) - '0';
+pos = 0;
+			}
+			
+pos = find_key ("bootrst=", array);
+			if (pos!=0) {
+bootrst = (array[pos+7]) - '0';
+pos = 0;
+			}
+			
+}
+
+
 
 
 
@@ -323,7 +425,7 @@ void _Error_Handler(char * file, int line)
 }
 
 
-void delay_us(uint32_t us) //Задержка для SPI
+void delay_us(uint32_t us)
 {
 	uint32_t us_count_tick =  us * (SystemCoreClock/1000000);
 	SCB_DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
@@ -335,7 +437,7 @@ void delay_us(uint32_t us) //Задержка для SPI
 
 
 
-int convert (char x, char y) { //Функция перевода данных строки в вещественные переменные.
+int convert (char x, char y) {
 int out1, out2, out, v,v1;
 	
 out1 = (x - '0');
