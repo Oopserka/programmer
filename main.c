@@ -12,7 +12,7 @@
 
 I2C_HandleTypeDef hi2c1;
 SPI_HandleTypeDef hspi1;
-
+/////////////////////////////////
 FATFS fs;
 FATFS *pfs;
 FIL fil;
@@ -21,29 +21,32 @@ DWORD fre_clust;
 FILINFO fsize, fname;
 DIR dir;
 uint32_t total, free;
+/////////////////////////////////
 
 void delay_us(uint32_t us);
-uint8_t program_enable_byte;
-unsigned int i;
-uint8_t reload_counter;
-uint8_t signature[3];	
-unsigned int string_structure[100];
 void write_string (char* string);
 int convert (char x, char y);
 void delay_us(uint32_t us);
 uint8_t find_key (char key[], char array[]);
-uint8_t read_fuses (char array[100]);
-int o;
-		int x, y, m;
-		int i2, res = -1;
+uint8_t read_fuses (char array[300]);
+void write_fuses ();
+void set_fuses ();
+void find_keys (char array[300]);
+uint8_t get_model (char array[300]);
+uint8_t get_filename (char array[300]);
+uint8_t verificate_fuses (void)	;
+void error (char message [20]);
+
+////////////////////////////////////////////////
 
 
-char buffer[1000];
-char batbuffer[100];
+uint8_t reload_counter, program_enable_byte, signature[3];
+unsigned int string_structure[100], i;
+int x, y,m, i2, res = -1, o,addr = 0, hr, lr, er;
+char buffer[300], batbuffer[300], filename[100], hrC, lrC, erC;
 
 
-int addr = 0;	
-char model [15];
+
 int main(void)
 {
   HAL_Init();
@@ -53,110 +56,28 @@ int main(void)
 	MX_I2C1_Init();
   MX_FATFS_Init();
 	ssd1306_Init (&hi2c1);	
-	
 
-	if (f_mount(&fs, "", 0) == FR_OK) {
-ssd1306_Fill (0);		
-ssd1306_SetCursor (0,0);		
-ssd1306_WriteString ("SD MOUNT OK", Font_7x10, 1);		
-ssd1306_UpdateScreen (&hi2c1);
-HAL_Delay (1000);
-	}
-	else {
-ssd1306_Fill (0);		
-ssd1306_SetCursor (0,0);		
-ssd1306_WriteString ("SD MOUNT NE OK", Font_7x10, 1);		
-ssd1306_UpdateScreen (&hi2c1);	
-HAL_Delay (1000);
-	}
+power_and_reset_sequence ();
+program_enable_byte = SPI_Read_Write (program_enable, 4, 3);
 	
-	
-if (f_open(&fil, "prog4.bat", FA_READ) == FR_OK) {
-ssd1306_Fill (0);		
-ssd1306_SetCursor (0,0);	
-ssd1306_WriteString ("SD OPEN OK", Font_7x10, 1);		
-ssd1306_UpdateScreen (&hi2c1);
-HAL_Delay (1000);
-}
-	else {
-ssd1306_Fill (0);		
-ssd1306_SetCursor (0,0);		
-ssd1306_WriteString ("SD OPEN NE OK", Font_7x10, 1);		
-ssd1306_UpdateScreen (&hi2c1);	
-HAL_Delay (1000);	
-	}
-
-
-while(f_gets((TCHAR*)buffer, 10000, &fil))
-  {
-for (i2 = 0; i2 <= 100; i2++) {
-if ((buffer[i2] != 13) && (buffer [i2] != 10))	 {
-	batbuffer[m++] = buffer[i2];
-}
-else {
-	i2 = 100;
-	m = 0;
-}
-}
-read_fuses(batbuffer);
-	ssd1306_Fill (0);
-  ssd1306_printInt (0,0,cksel, Font_7x10, 1);
-ssd1306_SetCursor (0,20);
-ssd1306_WriteString (batbuffer, Font_7x10, 1);
-	ssd1306_UpdateScreen (&hi2c1);
-
-}
-
-	/*
-///////////////////////////////////////////////////////////////////  
-	
-	power_and_reset_sequence ();
-  program_enable_byte = SPI_Read_Write (program_enable, 4, 3);
-	
-	if (program_enable_byte == 0x53) {
+		if (program_enable_byte == 0x53) {
 	ssd1306_Fill (0);
 	ssd1306_SetCursor (0,0);
-	ssd1306_WriteString ("Progr. mode enabled", Font_7x10, 1);
-	ssd1306_UpdateScreen (&hi2c1);
-		HAL_Delay (1000);
+	ssd1306_WriteString ("Connected to", Font_7x10, 1);
+	ssd1306_SetCursor (10,15);
+	ssd1306_WriteString ("The chip", Font_7x10, 1);		 
+	ssd1306_UpdateScreen (&hi2c1);		
+	HAL_Delay (1000);
 }
 else 
 {
-	power_and_reset_sequence ();
-  ssd1306_Fill (0);
-	ssd1306_SetCursor (0,0);
-	ssd1306_WriteString ("Progr. mode failed", Font_7x10, 1);
-	ssd1306_UpdateScreen (&hi2c1);
-	HAL_Delay (1000);
-	reload_counter = reload_counter +1;
+	error ("Connection error");
 }
-if (reload_counter >= 3) NVIC_SystemReset();
-
 
 signature[0] = SPI_Read_Write (read_signature1, 4, 4);
 signature[1] = SPI_Read_Write (read_signature2, 4, 4);	
 signature[2] = SPI_Read_Write (read_signature3, 4, 4);
 
-
-if ((signature[0] == 0x1E) && (signature[1] == 0x93) && (signature[2] == 0x0F))
-{
-  ssd1306_Fill (0);
-	ssd1306_SetCursor (0,0);
-	ssd1306_WriteString ("Atmega88-PA", Font_7x10, 1);
-	ssd1306_UpdateScreen (&hi2c1);
-	HAL_Delay (1000);
-}	
-
-
-else
-{
-	ssd1306_Fill (0);
-	ssd1306_SetCursor (0,0);
-	ssd1306_WriteString ("Signature Failed", Font_7x10, 1);
-	ssd1306_UpdateScreen (&hi2c1);
-	HAL_Delay (1000);	
-}	
-	
 SPI_Write (chip_erase,4);	 
 ssd1306_Fill (0);
 ssd1306_SetCursor (0,0);
@@ -165,12 +86,132 @@ ssd1306_UpdateScreen (&hi2c1);
 HAL_Delay (1000);
 
 
+	if (f_mount(&fs, "", 0) == FR_OK) {
+ssd1306_Fill (0);		
+ssd1306_SetCursor (0,0);		
+ssd1306_WriteString ("SD mount OK", Font_7x10, 1);		
+ssd1306_UpdateScreen (&hi2c1);
+HAL_Delay (1000);
+	}
+	else {
+error ("SD Mount error");
+	}
+	
+	
+if (f_open(&fil, "prog4.bat", FA_READ) == FR_OK) {
+ssd1306_Fill (0);		
+ssd1306_SetCursor (0,0);	
+ssd1306_WriteString ("Bat open OK", Font_7x10, 1);		
+ssd1306_UpdateScreen (&hi2c1);
+HAL_Delay (1000);
+}
+	else {
+error ("Bat file open error");		
+	}
+	
+///////////////////////////////////////////////////////////////////////////
+while(f_gets((TCHAR*)buffer, 10000, &fil))
+  {
+for (i2 = 0; i2 <= 300; i2++) {
+if ((buffer[i2] != 13) && (buffer [i2] != 10))	 {
+	batbuffer[m++] = buffer[i2];
+}
+else {
+	i2 = 300;
+	m = 0;
+}
+}
+get_filename(batbuffer);
+find_keys (batbuffer);
+get_model (batbuffer);
+set_fuses (batbuffer);
+}
+f_close(&fil);	
+
+
+
+
+if ((signature[0] == sign[0]) && (signature[1] == sign[1]) && (signature[2] == sign[2]))
+{
+  ssd1306_Fill (0);
+	ssd1306_SetCursor (0,0);
+	ssd1306_WriteString ("Signature OK", Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);	
+        ssd1306_SetCursor (0,15);
+        ssd1306_WriteString ("Atmega88PA", Font_7x10, 1);
+        ssd1306_UpdateScreen (&hi2c1);
+  			HAL_Delay (1000);
+}	
+else error ("Wrong chip");
+
+
+HAL_Delay (100);
+write_fuses();
+ssd1306_Fill (0);
+ssd1306_SetCursor (0,0);
+ssd1306_WriteString ("Fuses written", Font_7x10, 1);
+ssd1306_UpdateScreen (&hi2c1);
+HAL_Delay (1000);
+
+int result = verificate_fuses();
+
+if (((result & 4) >> 2) == 1) // High fuse check
+	{
+  ssd1306_Fill (0);
+	ssd1306_SetCursor (0,0);
+	ssd1306_WriteString ("High Fuse OK", Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);
+}
+	else {
+  error ("High fuse failed");	
+}
+
+if (((result & 2) >> 1) == 1) // Low fuse check
+	{
+	ssd1306_SetCursor (0,15);
+	ssd1306_WriteString ("Low Fuse OK", Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);
+}
+	else {
+error ("Low fuse failed");	
+}
+
+if ((result & 1) == 1) //Ext fuse check
+	{
+	ssd1306_SetCursor (0,30);
+	ssd1306_WriteString ("Ext Fuse OK", Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);
+	HAL_Delay (1000);
+}	
+	else {
+error ("Ext fuse failed");	
+}
+
+f_close(&fil);
+
+
+
+
+///////////////////////////////////////////////////////////////////////
+if (f_open(&fil, filename , FA_READ) == FR_OK) {
+ssd1306_Fill (0);		
+ssd1306_SetCursor (0,0);	
+ssd1306_WriteString ("Hex open OK", Font_7x10, 1);		
+ssd1306_UpdateScreen (&hi2c1);
+HAL_Delay (1000);
+}
+	else {
+error ("hex file open failed");	
+	}
+	
+
 while(f_gets((TCHAR*)buffer, 10000, &fil))
   {
 for (i2 = 0; i2 <=1000; i2++) {
 	   if ((buffer[i2] != 10) && (buffer[i2] != 13)) {
 	ssd1306_Fill (0);
 	ssd1306_SetCursor (0,0);
+	ssd1306_WriteChar (buffer[i2], Font_7x10, 1);		 
 	ssd1306_printInt (0, 20, i2, Font_7x10, 1);
 	ssd1306_UpdateScreen (&hi2c1);
 		 }
@@ -219,11 +260,10 @@ page (res);
 
 //////////////////////////////////////////////////////////////////////
 
-
-*/
-
 f_close(&fil);
 f_mount(NULL, "", 1);
+
+
 
   while (1)
   {
@@ -231,10 +271,105 @@ f_mount(NULL, "", 1);
   }
 }
 
-uint8_t find_key (char key[10], char array[100]) {
-char *istr = strstr (array,key);
+
+
+void set_fuses () {
+read_fuses(batbuffer);
 	
-   if ( istr == NULL) {
+if (fuse >0) {
+Fuse_high = ((rstdisbl <<7)	| (dwen <<6) | (1<<5)| (wdton << 4) | (eesave <<3) | (bodlevel)) ^ 0xFF;
+Fuse_low = ((ckdiv8 << 7) | (ckout <<6) | (sut <<4) | (cksel)) ^ 0xFF;
+Fuse_ext = ((bootsz << 2) | (bootrst)) ^ 0xFF;
+lock = ((bootlock << 2)| (lockbit)) ^ 0xFF;	
+}
+}
+
+void write_fuses (void) {
+unsigned char FH[4] = {0xAC, 0xA8, 0x00, Fuse_high};		
+unsigned char FL[4] = {0xAC, 0xA0, 0x00, Fuse_low};				
+unsigned char FE[4] = {0xAC, 0xA4, 0x00, Fuse_ext};		
+
+SPI_Write (FL,4);
+SPI_Write (FH,4);		
+SPI_Write (FE,4);
+}
+
+
+	
+	
+uint8_t verificate_fuses (void)	 {
+uint8_t out, h, l ,e;
+	
+unsigned char FHr[4] = {0x58, 0x08, 0x00, 0x00};		
+unsigned char FLr[4] = {0x50, 0x00, 0x00, 0x00};				
+unsigned char FEr[4] = {0x50, 0x08, 0x00, 0x00};		
+
+lrC = SPI_Read_Write (FLr, 4, 4);
+hrC = SPI_Read_Write (FHr, 4, 4);
+erC = SPI_Read_Write (FEr, 4, 4);
+
+hr = hrC;
+if (Fuse_high == hr) {
+h = 1;
+}
+else h = 0;
+
+
+lr = lrC;
+if ((Fuse_low == lr) || (Fuse_low == lr-16)) {
+l = 1;
+
+}
+
+else l = 0;
+
+er = erC;
+if (Fuse_ext == er) {
+er = 1;
+}
+else er = 0;
+
+out = (h<<2) | (l<<1) | er;
+
+
+return out;
+}
+
+
+
+	
+uint8_t get_filename (char array[300]) {
+uint8_t u,x0, x1,l;
+	int n;
+x0 = find_key ("-c", array);	
+x1 = find_key (".hex", array);
+
+if ((x1 != 0) && (x0 !=0)) {
+x1 = x1 +2;
+x0 =x0+1;
+l = x1 - x0;	
+
+for (u = x0; u <=x1; u++) {	
+filename [u-x0] = array[u];	
+
+}
+n = 0;	
+u = 0;
+}
+
+else {
+x0 = 0;
+x1 = 0;	
+}
+}
+
+
+
+
+
+uint8_t find_key (char key[10], char array[300]) { 
+char *istr = strstr (array,key);
+   if (istr == NULL) {
 return 0;
 	 }
    else {
@@ -243,76 +378,111 @@ return pos;
 }
 }
 
-uint8_t read_fuses (char array[100]) {
 
+
+
+void find_keys (char array[300]) {
+erase = find_key ("-e", array);
+write = find_key ("-w", array);	
+verificate = find_key ("-v", array);	
+fuse = find_key ("-f", array);	
+}
+
+
+
+
+
+
+uint8_t read_fuses (char array[300]) {
+///////////////////////////////////////////////////////////////////////////////
 uint8_t pos = find_key ("bodlevel=", array);
 	if (pos!=0) {
 bodlevel = (array[pos+8] - '0');
 pos = 0;
 	}
-	
+///////////////////////////////////////////////////////////////////////////////	
 pos = find_key ("rstdisbl=", array);
 	if (pos!=0) {	
 rstdisbl = array[pos+8] - '0';
 pos = 0;	
 	}		
-	
+///////////////////////////////////////////////////////////////////////////////	
 pos = find_key ("dwen=", array);
 	if (pos!=0) {
 dwen = array[pos+4] - '0';
 pos = 0;
 	}
-	
+///////////////////////////////////////////////////////////////////////////////	
 pos = find_key ("wdton=", array);
 		if (pos!=0) {
 wdton = array[pos+5]- '0';
 pos = 0;
 		}
-				
+///////////////////////////////////////////////////////////////////////////////				
 pos = find_key ("eesave=", array);
 			if (pos!=0) {
 eesave = (array[pos+6]) - '0';
 pos = 0;
 			}
-				
+///////////////////////////////////////////////////////////////////////////////				
 pos = find_key ("ckdiv8=", array);
 			if (pos!=0) {
 ckdiv8 = (array[pos+6]) - '0';
 pos = 0;
 			}
-				
+///////////////////////////////////////////////////////////////////////////////				
 pos = find_key ("ckout=", array);
 			if (pos!=0) {
 ckout = (array[pos+5]) - '0';
 pos = 0;
 			}			
-				
+///////////////////////////////////////////////////////////////////////////////				
 pos = find_key ("sut=", array);
 			if (pos!=0) {
 sut = (array[pos+3]) - '0';
 pos = 0;
 			}			
-							
+///////////////////////////////////////////////////////////////////////////////							
 pos = find_key ("cksel=", array);
 			if (pos!=0) {
+				if ((array[pos+6] >= '0') && (array[pos+6])<= '9') {
+cksel = ((((array[pos+5]) - '0') *10) + (array[pos+6]) - '0');
+pos = 0;
+			}
+				else {
 cksel = (array[pos+5]) - '0';
 pos = 0;
 			}
-			
+}
+///////////////////////////////////////////////////////////////////////////////			
 pos = find_key ("bootsz=", array);
 			if (pos!=0) {
 bootsz = (array[pos+6]) - '0';
 pos = 0;
 			}
-			
+///////////////////////////////////////////////////////////////////////////////			
 pos = find_key ("bootrst=", array);
 			if (pos!=0) {
 bootrst = (array[pos+7]) - '0';
 pos = 0;
-			}
-			
+			}			
 }
 
+void error (char message [20]) {
+	ssd1306_Fill (0);
+	ssd1306_SetCursor (0,0);
+	ssd1306_WriteString (message, Font_7x10, 1);
+	ssd1306_UpdateScreen (&hi2c1);
+	HAL_Delay (5000);
+	HAL_NVIC_SystemReset ();
+}
+
+
+uint8_t get_model (char array[300]) {
+uint8_t value;
+uint8_t model;
+value = find_key ("tiny44", array);
+}
 
 
 
